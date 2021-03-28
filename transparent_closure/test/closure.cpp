@@ -3,12 +3,12 @@
 #include <tuple>
 #include "closure.hpp"
 
-
-template<class T>
-struct not_int :public std::true_type{};
-template<>
-struct not_int<int> :public std::false_type{};
-
+namespace {
+  template<class T>
+  struct not_int :public std::true_type{};
+  template<>
+  struct not_int<int> :public std::false_type{};
+}// 
 TEST_CASE("metaprogramming" ){
 
   using namespace transparent_closure;
@@ -27,42 +27,7 @@ TEST_CASE("metaprogramming" ){
     CHECK_FALSE(detail::has_open_argument<>::value);
     CHECK(detail::has_only_open_arguments<>::value);
   };
-  SUBCASE("concat"){
-    CHECK(std::is_same<
-	  type_container<int, long> ,
-	   concat<
-	   type_container<int>,
-	   type_container<long>
-	>
-	>::value);
-    
-    CHECK(std::is_same<
-	  type_container<int, long, float> ,
-	   concat<
-	  type_container<int>,
-	  type_container<long>,
-	   type_container<float>
-	  >
-	  >::value);
-    CHECK(std::is_same<
-	  type_container<int, long, float, double,int> ,
-	  concat<
-	  type_container<int>,
-	  type_container<long>,
-	  type_container<float>,
-	  type_container<double>,
-	  type_container<>,
-	  type_container<int>
-	  >
-	  >::value);
-  };
   
-  SUBCASE("filter"){
-    CHECK(std::is_same<
-	  type_container<long, float, double>,
-	  filter<not_int,type_container<int, long, float, double,int>> 
-	  >::value);
-  };
 
   
 };
@@ -71,8 +36,6 @@ int test_function(){
   return 1;
 };
 
-template<class T>
-struct show;
 
 TEST_CASE("ArgumentContainer"){
   using namespace transparent_closure;
@@ -88,19 +51,21 @@ TEST_CASE("ArgumentContainer"){
     };
   };
   SUBCASE("instanciate enclosing closure"){
-    using enclosing_cont1_t = ArgumentContainer<double, type_container<enclosed_argument<float,double>,int>>  ;
-    using cont1_t = ArgumentContainer<double, type_container<float,int>>;
-    CHECK(std::is_same<enclosing_cont1_t::enclosed_type, double>::value);
+    using enclosing_cont1_t = ArgumentContainer<double, type_container<enclosed_argument<const float&,float>,int&>>  ;
+    using cont1_t = ArgumentContainer<double, type_container<const float&,int&>>;
+    CHECK(std::is_same<enclosing_cont1_t::enclosed_type, float>::value);
     enclosing_cont1_t cont1{[]()->cont1_t{
-	return cont1_t([](float i, int j)->double{return i*j;});
+	return cont1_t([](const float& i, int& j)->double{return i*j;});
       }(),3.0
 	 };
+    int a = 1;
+    
+    cont1(a);
   };
   SUBCASE("invocation"){
     int i = 1;
     int& j = i;
     int& m = std::forward<int&>(j);
-    //    show<decltype(m)>{};
     long k = 22;
     float l = 4.0;
     ArgumentContainer<double, type_container<int&&, const long&, float&>> arg_cont0{

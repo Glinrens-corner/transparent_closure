@@ -51,54 +51,14 @@ namespace transparent_closure{
     };
 
   }//detail
-  template<
-    template<class>typename predicate_T,
-    template<class>typename transformer_T,
-    class ...arg_ts>
-  struct transform_first_matching_impl;
-
-
-  template<
-    template<class>typename predicate_T,
-    template<class>typename transformer_T,
-    class first_t,
-    class ...arg_ts>
-  struct transform_first_matching_impl<
-    predicate_T,
-    transformer_T,
-    first_t,
-    arg_ts...>{
-    using type =
-      if_else<
-      predicate_T<first_t>::value,
-      concat<type_container<transformer_T<first_t>>,
-	     type_container<arg_ts...>>,
-      concat<type_container<first_t>,
-	     typename transform_first_matching_impl<
-	       predicate_T,
-	       transformer_T,
-	       arg_ts...>::type
-	     >
-      >;
-    
-  };
-  template<
-    template<class>typename predicate_T,
-    template<class>typename transformer_T
-    >
-  struct transform_first_matching_impl<predicate_T,transformer_T>{
-    using type = type_container<>;
-  };
-  template<
-    template<class>typename predicate_T,
-    template<class>typename transformer_T,
-    class ...arg_ts>
-  using transform_first_matching=
-    typename transform_first_matching_impl<predicate_T, transformer_T,arg_ts... >::type;
 
   template <class return_t, class arguments_t, class enable=void> 
   class ArgumentContainer;
+  
+  // derive_superclass
   namespace detail{
+    // derive superclass is a little helper class
+    //  it is used to generate 
     template<class return_t,  class arguments_t >
     struct derive_superclass_impl{
       template<class T>
@@ -128,13 +88,31 @@ namespace transparent_closure{
     using derive_superclass = typename
       derive_superclass_impl<return_t, arguments_t>::type;
   }//detail
+
+  namespace detail{
+    template<std::size_t offset, class ... tuple_ts, size_t ... indices>
+    decltype(auto) extract_from_tuple(std::tuple<tuple_ts...> atuple,std::index_sequence<indices...> seq){
+      using tuple_t = std::tuple<tuple_ts...>;
+      return std::tuple<typename std::tuple_element<offset+indices,tuple_t>::type...>(std::get<offset+indices>(atuple)...);
+    };
+    
+    template<std::size_t pos, class insert_t, class  tuple_t>
+    decltype(auto) insert_into_tuple (tuple_t tuple, insert_t insert ){
+      return std::tuple_cat(
+	  extract_from_tuple<0>( tuple, std::make_index_sequence<pos>()),
+	  std::tuple<insert_t>(insert),
+	  extract_from_tuple<pos>(tuple, std::make_index_sequence<std::tuple_size<tuple_t>::value-pos>())
+      );
+    };
+  }// detail
   
   template<class return_t, class ...argument_ts >
   class  ArgumentContainer<
     return_t,
     type_container<argument_ts...>,
     typename enable_if<
-      type_container<argument_ts...>::template apply<detail::has_only_open_arguments>::value,
+      type_container<argument_ts...>
+      ::template apply<detail::has_only_open_arguments>::value,
       void>::type>
     {
   private:
@@ -154,20 +132,20 @@ namespace transparent_closure{
     
   public:
     template <class arg_t>
-    explicit   ArgumentContainer(arg_t in)
+    explicit ArgumentContainer(arg_t in)
       :function_ptr_(static_cast<function_ptr_t>(in)){
       assert(this->function_ptr_);
     };
 
     template<class ... argument2_ts>
-    return_t operator() (argument2_ts ...args ){
+    return_t operator() (argument2_ts ...args )const{
       return this->apply(
 	  detail::ApplyTuplePacker<apply_tuple_t>::pack(std::forward<argument_ts>(args)...)
       );
     };
     
-  private:
-    return_t apply(  apply_tuple_t && apply_tuple){
+  protected:
+    return_t apply(  apply_tuple_t && apply_tuple)const{
       return std::apply(this->function_ptr_,std::move(apply_tuple) );
     };
 
@@ -202,18 +180,47 @@ namespace transparent_closure{
     using argument_t = typename enclosed_argument_holder_t::argument_type;
 
     using superclass_t = detail::derive_superclass<return_t,type_container<argument_ts...> >;
-   
+
+       template <class ... arg_ts>
+    using index_of_first_enclosed_argument = index_of_first_matching<
+      detail::is_enclosed_argument,
+      arg_ts...
+      >;
+    template<class ... arg_ts>
+    using filter_open_arguments = filter<detail::is_open_argument, arg_ts... >;
+    
+    using apply_tuple_t =
+      typename total_arguments_t
+      ::template apply<filter_open_arguments>
+      ::template apply<std::tuple>;
+
   public:
     using enclosed_type = enclosed_t;
   public:
     ArgumentContainer(superclass_t&& super, enclosed_t&& enclosed_argument  )
       :superclass_t(std::move(super))
       ,enclosed_argument_(std::forward<enclosed_t>(enclosed_argument)) {};
+
+    template<class ... argument2_ts>
+    return_t operator() (argument2_ts&& ...args )const{
+      return this->apply(
+	  detail::ApplyTuplePacker<apply_tuple_t>::pack(std::forward<argument2_ts>(args)...)
+      );
+    };
+    
+  protected:
+    return_t apply(  apply_tuple_t && apply_tuple)const{
+      constexpr std::size_t position = total_arguments_t
+	::template apply<index_of_first_enclosed_argument>
+	:: value;
+      return superclass_t::apply(  
+	  detail::insert_into_tuple<position,argument_t>(apply_tuple,   this->enclosed_argument_)
+      );
+	    
+	};
   private:
     enclosed_t enclosed_argument_;
   };
-  
-
 
 }// transparent_closure
 
