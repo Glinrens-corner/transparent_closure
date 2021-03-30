@@ -31,6 +31,11 @@ namespace transparent_closure{
 namespace transparent_closure{
   template<class ...Arg_ts>
   struct concat_impl;
+
+  template<>
+  struct concat_impl<>{
+    using type=type_container<>;
+  };
   
   template<class ...Arg_ts>
   struct concat_impl<type_container<Arg_ts...>>{

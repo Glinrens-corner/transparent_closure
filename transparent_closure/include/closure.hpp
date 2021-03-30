@@ -2,7 +2,9 @@
 #define TRANSPARENT_CLOSURE_CLOSURE_HPP
 
 #include <cassert>
+#include <memory>
 #include "meta_util.hpp"
+
 
 // ArgumentContainer
 namespace transparent_closure{
@@ -168,8 +170,6 @@ namespace transparent_closure{
       assert(this->function_ptr_);
     };
     
-
-    
     template<std::size_t pos, class enclosed_t>
     struct enclose_argument_at_position{
       template<class arg_t>
@@ -198,7 +198,6 @@ namespace transparent_closure{
       );
     };
     
-  protected:
     return_t apply(  apply_tuple_t && apply_tuple)const{
       return std::apply(this->function_ptr_,std::move(apply_tuple) );
     };
@@ -277,6 +276,7 @@ namespace transparent_closure{
       :superclass_t(std::move(super))
       ,enclosed_argument_(std::forward<input_t>(enclosed_argument)) {};
 
+  public:
     template<class ... argument2_ts>
     return_t operator() (argument2_ts&& ...args )const{
       return this->apply(
@@ -308,9 +308,7 @@ namespace transparent_closure{
 	  enclosed_position, enclosed_t, new_superclass_t>;
       return new_self_class_t{std::move(new_super), std::move(this->enclosed_argument_)};
     };
-
-    
-  protected:
+  public:
     return_t apply(  apply_tuple_t && apply_tuple)const{
       return superclass_t::apply(  
 	  detail::insert_into_tuple<enclosed_position,argument_t>(apply_tuple,   this->enclosed_argument_)
@@ -322,7 +320,69 @@ namespace transparent_closure{
 
 }// transparent_closure
 
+//
+namespace transparent_closure{
+  template<class return_t, class arguments_t>
+  class ArgumentContainerHolderBase{
+    using apply_tuple_t = typename arguments_t
+      ::template apply<std::tuple>;
+  public:
+    virtual return_t apply(apply_tuple_t&& )const=0;
+    virtual ~ArgumentContainerHolderBase(){};
+  };
+  
+  template<class ... arg_ts>
+  using filter_open_arguments = filter<detail::is_open_argument, arg_ts... >;
 
+  template<class return_t,class arguments_t>
+  class ArgumentContainerHolder
+    : public ArgumentContainerHolderBase<
+    return_t,
+    typename arguments_t
+    ::template apply<filter_open_arguments>
+    >{
+    
+    using apply_tuple_t =
+      typename arguments_t
+      ::template apply<filter_open_arguments>
+  ::template apply<std::tuple>;
+    
+  public:
+    ArgumentContainerHolder(
+	ArgumentContainer<return_t, arguments_t> container)
+      :container_(std::move(container)){};
+    return_t apply(apply_tuple_t&& tuple)const{
+      return this->container_.apply(std::move(tuple));
+    };
+  private:
+    ArgumentContainer<return_t, arguments_t> container_;
+  };
+  template<class return_t, class arguments_t>
+  class Function;
+
+  template<class return_t, class ... argument_ts>
+  class Function<return_t, type_container<argument_ts...>>{
+    using arguments_t = type_container<argument_ts...>;
+    using apply_tuple_t =
+      typename arguments_t
+      ::template apply<filter_open_arguments>
+      ::template apply<std::tuple>;
+   
+  public:
+    explicit Function(std::shared_ptr<ArgumentContainerHolderBase<return_t, type_container<argument_ts...> > > container)
+      :container_(std::move(container)){};
+    template<class ... argument2_ts>
+    return_t operator()(argument2_ts&& ...arguments)const{
+      return this->container_->apply(
+	  apply_tuple_t( std::forward<argument2_ts>(arguments)...)
+      );
+    };
+  private:
+    std::shared_ptr<ArgumentContainerHolderBase<return_t, type_container<argument_ts...> > > container_;
+  };
+  
+
+};
 
 // Closure
 namespace transparent_closure{
@@ -331,6 +391,14 @@ namespace transparent_closure{
   class Closure{
   private:
     using container_t = ArgumentContainer<return_t,arguments_t>;
+
+    template<class ... arg_ts>
+    using filter_open_arguments = filter<detail::is_open_argument, arg_ts... >;
+    
+    using open_arguments_t =
+      typename arguments_t
+      ::template apply<filter_open_arguments>;
+
   public:
     explicit Closure(container_t container):container_(std::move(container)){};
     template<class ...argument_ts>
@@ -344,6 +412,13 @@ namespace transparent_closure{
       return Closure<return_t, typename decltype(new_container)::arguments_type>(std::move(new_container)
       );
     };
+    
+    decltype(auto) as_fun()&&{
+      return Function<return_t, open_arguments_t>{
+	std::shared_ptr<ArgumentContainerHolderBase<return_t, open_arguments_t>>{
+	  new ArgumentContainerHolder<return_t, arguments_t>{std::move(this->container_ )}}};
+    };
+    
     template<class bind_first_t, class ...bind_ts>
     decltype(auto) bind(bind_first_t&& bind_first_arg, bind_ts&&... bind_args)&&{
       return std::move(*this).template bind_at<0>( std::forward<bind_first_t>(bind_first_arg)).bind(std::forward<bind_ts>(bind_args)...);

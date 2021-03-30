@@ -122,6 +122,14 @@ TEST_CASE("ArgumentContainer"){
     using bound_cont_t =
       Closure<double, type_container<enclosed_argument<float,float>, enclosed_argument<int,int>>>;
      bound_cont_t bound_cont = std::move(cont1).bind(static_cast<float>(2.0),static_cast<int>(3));
+     SUBCASE("Function"){
+       Function<double,type_container<>>  fun = std::move(bound_cont).as_fun();
+       CHECK(fun() == 6.0);
+       CHECK(fun() == 6.0);
+       Function<double,type_container<>> fun2 = fun;
+       CHECK(fun2() == 6.0);
+       CHECK(fun() == 6.0);
+     };
   };
 
 };
