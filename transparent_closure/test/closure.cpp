@@ -1,6 +1,8 @@
 #include "doctest/doctest.h"
 #include <utility>
 #include <tuple>
+#include <vector>
+#include <memory>
 #include "closure.hpp"
 
 namespace {
@@ -35,8 +37,11 @@ TEST_CASE("metaprogramming" ){
 int test_function(){
   return 1;
 };
-
-
+namespace {
+  long test_fn(int i, int j){
+    return i*j;
+  };
+};
 TEST_CASE("ArgumentContainer"){
   using namespace transparent_closure;
   SUBCASE("instantiation"){
@@ -62,6 +67,14 @@ TEST_CASE("ArgumentContainer"){
     
     cont1(a);
   };
+  
+  SUBCASE("make_closure"){
+    Closure<long, type_container<int,int>> cl = make_closure([](int,int)->long{return 56;});
+    CHECK(cl(4,5) == 56);
+    Closure<long, type_container<int,int>> cl2 = make_closure(test_fn);
+    CHECK(cl2(4,5) == 20);
+  };
+  
   SUBCASE("invocation"){
     int i = 1;
     int& j = i;
@@ -73,6 +86,42 @@ TEST_CASE("ArgumentContainer"){
     };
     CHECK(arg_cont0(std::move(i), k, l) ==  2.0);
     CHECK(std::is_same<decltype(arg_cont0(std::move(i), k, l)),double >::value);
+  };
+  
+  SUBCASE("bind and invoke"){  
+    ArgumentContainer<double, type_container<const float&, const int&>> cont1{[](const float& a, const int& b)->double{return a*b;} };
+    ArgumentContainer<double, type_container<const float&, enclosed_argument<const int&,int>>>  bound_cont1= cont1.bind_at<1,int>(2);
+    auto fully_bound_cont1 = std::move(bound_cont1).bind_at<0>( static_cast<float>(3.0));
+    CHECK(fully_bound_cont1() == 6.0 );
+    CHECK(fully_bound_cont1() == 6.0 );
+    
+    ArgumentContainer<double, type_container<enclosed_argument<const float&, float>, const int&>>  bound_cont2= cont1.bind_at<0,float>(3.0);
+    int i = 2;
+    int& j = i;
+    auto fully_bound_cont2 = std::move(bound_cont2).bind_at<0>( j);
+    //  show<decltype(fully_bound_cont2),decltype(fully_bound_cont1)>{};
+    CHECK(fully_bound_cont2() == 6.0 );
+    // Note arguments are stored as decay<input_type>::type
+    // so references are stored as values!
+    j = 3;
+    CHECK(fully_bound_cont2() == 6.0 );
+  };
+  SUBCASE("bind and invoke with conversion"){
+    ArgumentContainer<double, type_container<float, int>> cont1{
+      []( float a, int b)->double{return a*b;}
+    };
+    ArgumentContainer<double, type_container<enclosed_argument<float,double>, enclosed_argument<int,char>>>
+      cont1_bound =cont1.bind_at<0>(static_cast<double>( 3.0)).bind_at<0>(static_cast<char>(2 )); 
+  };
+  SUBCASE("bind multiple"){
+    Closure<double, type_container<float, int>>cont1 {
+	ArgumentContainer<double, type_container<float, int> >{
+	  []( float a, int b)->double{return a*b;}
+	}
+    };
+    using bound_cont_t =
+      Closure<double, type_container<enclosed_argument<float,float>, enclosed_argument<int,int>>>;
+     bound_cont_t bound_cont = std::move(cont1).bind(static_cast<float>(2.0),static_cast<int>(3));
   };
 
 };

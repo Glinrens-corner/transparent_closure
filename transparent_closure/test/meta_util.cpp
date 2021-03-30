@@ -1,5 +1,6 @@
 #include "doctest/doctest.h"
 #include "meta_util.hpp"
+
 namespace {
   template<class T>
   struct not_int :public std::true_type{};
@@ -48,8 +49,9 @@ TEST_CASE("metaprogramming utility"){
 	  type_container<long, float, double>,
 	  typename type_container<int, long, float, double,int>::template apply<filter_not_int>	
 	  >::value);
-    //  show<typename type_container<int, long, float, double,int>::template apply<filter_not_int> 
-    //	 >::value> {};
   };
 
 };
+
+
+

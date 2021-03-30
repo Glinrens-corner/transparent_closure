@@ -205,4 +205,31 @@ namespace transparent_closure{
   using index_of_first_matching = index_of_first_matching_impl<0,predicate_T, arg_ts...>;
   
 }//transparent_closure
+
+namespace transparent_closure{
+  template<std::size_t pos, template<class> typename transform_T, class ...arg_ts>
+  struct apply_at_position_impl;
+
+  
+  template<std::size_t pos, template<class> typename transform_T, class first_t, class ...arg_ts>
+  struct apply_at_position_impl<pos, transform_T,first_t,arg_ts...>{
+    using type = concat<
+      type_container<first_t>,
+      typename apply_at_position_impl<pos-1, transform_T, arg_ts...>::type>;
+    
+  };
+
+  template< template<class> typename transform_T,class first_t,  class ...arg_ts>
+  struct apply_at_position_impl<0, transform_T, first_t, arg_ts...>{
+    using type = type_container<transform_T<first_t>, arg_ts...>;
+  };
+  template< std::size_t pos, template<class> typename transform_T>
+  struct apply_at_position_impl<pos, transform_T>{
+    using type = type_container<>;
+  };
+
+  
+  template<std::size_t pos, template<class> typename transform_T, class ...arg_ts>
+  using apply_at_position = typename apply_at_position_impl<pos,transform_T,arg_ts...>::type;
+}// transparent_closure
 #endif // TRANSPARENT_CLOSURE_META_UTIL_HPP
