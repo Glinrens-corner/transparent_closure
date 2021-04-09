@@ -4,7 +4,8 @@
 #include <cassert>
 #include <memory>
 #include "meta_util.hpp"
-
+#include <iostream>
+#include <typeinfo>
 
 // ArgumentContainer
 namespace transparent_closure{
@@ -48,6 +49,7 @@ namespace transparent_closure{
     template<class ... Arg_ts>
     struct ApplyTuplePacker<std::tuple<Arg_ts...>>{
       using apply_tuple_t =std::tuple<Arg_ts...>;
+      
       static apply_tuple_t pack(Arg_ts&&... args){
 	return  apply_tuple_t(std::forward<Arg_ts>(args)... );
       };
@@ -60,18 +62,22 @@ namespace transparent_closure{
   
   // derive_superclass
   namespace detail{
+    
     // derive superclass is a little helper class
-    //  it is used to generate 
+    //  it is used to generate the type of the superclass 
     template<class return_t,  class arguments_t >
     struct derive_superclass_impl{
+
       template<class T>
       struct to_argument_type_impl{
 	using type = void;
       };
+      
       template<class T, class V>
       struct to_argument_type_impl<enclosed_argument<T,V>>{
 	using type = typename enclosed_argument<T,V>::argument_type;
       };
+      
       template <class T >
       using to_argument_type = typename to_argument_type_impl<T>::type;
 	
@@ -81,26 +87,30 @@ namespace transparent_closure{
 	detail::is_enclosed_argument,
 	to_argument_type,
 	arg_ts...>;
-	
+ 
       using new_arguments_t= typename arguments_t
 	::template apply<open_first_closed_argument>;
 
       using type = ArgumentContainer<return_t, new_arguments_t>;
     };
+    
     template<class return_t,  class arguments_t >
-    using derive_superclass = typename
-      derive_superclass_impl<return_t, arguments_t>::type;
+    using derive_superclass = 
+      typename derive_superclass_impl<return_t, arguments_t>::type;
   }//detail
 
   namespace detail{
+    // inserts enclosed arguments into the tuple of arguments
     template<std::size_t offset, class ... tuple_ts, size_t ... indices>
-    decltype(auto) extract_from_tuple(std::tuple<tuple_ts...> atuple,std::index_sequence<indices...> seq){
+    decltype(auto) extract_from_tuple(std::tuple<tuple_ts...>& atuple,std::index_sequence<indices...> ){
       using tuple_t = std::tuple<tuple_ts...>;
+      
       return std::tuple<typename std::tuple_element<offset+indices,tuple_t>::type...>(std::get<offset+indices>(atuple)...);
     };
     
     template<std::size_t pos, class insert_t, class  tuple_t>
-    decltype(auto) insert_into_tuple (tuple_t tuple, insert_t insert ){
+    decltype(auto) insert_into_tuple (tuple_t& tuple, insert_t insert ){
+      
       return std::tuple_cat(
 	  extract_from_tuple<0>( tuple, std::make_index_sequence<pos>()),
 	  std::tuple<insert_t>(insert),
@@ -111,6 +121,8 @@ namespace transparent_closure{
 
   namespace detail {
 
+    // metafunction to be applied to a type_container<argument_ts...>
+    //  to replace an argument_t at position pos by enclosed_argument<argument_t, enclosed_t>
     template<std::size_t pos, class enclosed_t>
     struct enclose_argument_at_position{
       template<class arg_t>
@@ -118,6 +130,7 @@ namespace transparent_closure{
       
       template<class ...arg_ts>
       using conversion_fn =  apply_at_position<pos, transform_T, arg_ts...>;
+      
       template<class T>
       using apply_to = typename T::template apply<conversion_fn>;
     };
@@ -127,16 +140,19 @@ namespace transparent_closure{
 
     
     template<std::size_t pos, class enclosed_t, class return_t, class args_t>
-    struct derive_new_self_class_impl<pos, enclosed_t, ArgumentContainer<return_t, args_t>>{
-      using new_args_t  = typename enclose_argument_at_position<pos,enclosed_t>
+    struct derive_new_self_class_impl<pos, enclosed_t, ArgumentContainer<return_t, args_t, void >>{
+      using new_args_t  =
+	typename enclose_argument_at_position<pos,enclosed_t>
 	::template apply_to<args_t>;
-      using type = ArgumentContainer<return_t,new_args_t>;
+   
+      using type = ArgumentContainer<return_t,new_args_t, void>;
     };
     
     template<std::size_t pos, class enclosed_t, class superclass_t>
     using derive_new_self_class = typename derive_new_self_class_impl<
       pos, enclosed_t, superclass_t>::type;
   }//detail
+  
   template<class return_t, class ...argument_ts >
   class  ArgumentContainer<
     return_t,
@@ -198,7 +214,8 @@ namespace transparent_closure{
       );
     };
     
-    return_t apply(  apply_tuple_t && apply_tuple)const{
+    return_t apply(  apply_tuple_t apply_tuple)const{
+      assert(this->function_ptr_);
       return std::apply(this->function_ptr_,std::move(apply_tuple) );
     };
 
@@ -309,8 +326,9 @@ namespace transparent_closure{
       return new_self_class_t{std::move(new_super), std::move(this->enclosed_argument_)};
     };
   public:
-    return_t apply(  apply_tuple_t && apply_tuple)const{
-      return superclass_t::apply(  
+    return_t apply(  apply_tuple_t apply_tuple)const{
+      
+      return superclass_t::apply(
 	  detail::insert_into_tuple<enclosed_position,argument_t>(apply_tuple,   this->enclosed_argument_)
       );    
     };
@@ -327,7 +345,7 @@ namespace transparent_closure{
     using apply_tuple_t = typename arguments_t
       ::template apply<std::tuple>;
   public:
-    virtual return_t apply(apply_tuple_t&& )const=0;
+    virtual return_t apply(apply_tuple_t )const=0;
     virtual ~ArgumentContainerHolderBase(){};
   };
   
@@ -351,7 +369,7 @@ namespace transparent_closure{
     ArgumentContainerHolder(
 	ArgumentContainer<return_t, arguments_t> container)
       :container_(std::move(container)){};
-    return_t apply(apply_tuple_t&& tuple)const{
+    return_t apply(apply_tuple_t tuple)const{
       return this->container_.apply(std::move(tuple));
     };
   private:
@@ -401,6 +419,12 @@ namespace transparent_closure{
 
   public:
     explicit Closure(container_t container):container_(std::move(container)){};
+
+    Closure(Closure<return_t,arguments_t> && other)
+      :container_(std::move(other.container_)){
+      
+    };
+       
     template<class ...argument_ts>
     return_t operator()(argument_ts...arguments)const{
       return this->container_(std::forward<argument_ts>(arguments)...);

@@ -46,3 +46,21 @@ TEST_CASE("IteratorStack"){
     CHECK(stack.get_size() == 0 );
   };
 };
+
+
+TEST_CASE("get_memcompare_data"){
+  using namespace transparent_closure;
+  int i=1;
+  IteratorStack stack{};
+  auto memcompare_data = adapter::get_memcompare_data<int>(
+      &i,
+      stack,
+      nullptr,
+      nullptr
+  );
+  //  CHECK_FALSE(memcompare_data.next_obj);
+  CHECK_FALSE(memcompare_data.next_function);
+  CHECK(memcompare_data.size == sizeof(int));
+  
+  
+}
