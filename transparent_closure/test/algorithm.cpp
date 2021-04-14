@@ -1,7 +1,8 @@
-#include "doctest/doctest.h"
-#include "algorithm.hpp"
 #include <array>
+#include <iostream>
 
+#include "doctest/doctest.h"
+#include "transparent_vector.hpp"
 
 TEST_CASE("IteratorStack"){
   using transparent_closure::IteratorStack;
@@ -125,3 +126,30 @@ TEST_CASE("get_memcompare_data"){
 	stack));
   };  
 }
+
+
+TEST_CASE("compare objects"){
+  using namespace transparent_closure;
+  SUBCASE("trivial"){
+    int i=1;
+    int j=1;
+    int k=2;
+    CHECK(compare_transparent_objects(i,j));
+    CHECK_FALSE(compare_transparent_objects(i,k));
+  };
+  
+  SUBCASE("vector"){
+    std::vector<int>vec1 {12,543,776 };
+    std::vector<int>vec2 {12,543,776 };
+    std::vector<int>vec3 {12,543,776, 765 };
+    std::vector<int>vec4 {12,543,777 };
+    IteratorStack stack{};
+    adapter::get_memcompare_data(&vec1, stack, nullptr, nullptr);
+    CHECK(compare_transparent_objects(vec1,vec2));
+    // CHECK_FALSE(compare_transparent_objects(vec1,vec3));
+    // CHECK_FALSE(compare_transparent_objects(vec1,vec4));
+
+
+  };
+  
+};

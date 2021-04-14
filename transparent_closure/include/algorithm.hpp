@@ -131,12 +131,12 @@ namespace transparent_closure{
     struct is_member_accessible: std::false_type {};
 
     // is_specialized means there is a specialized version of
-    // detail::get_mem_compare_info for this type
+    // get_memcompare_data for this type
     template <class T, class enable =void>
     struct is_specialized:std::false_type{};
     
     // a protocol_compatible type has a
-    //  MemcompareInfo get_memcompare_data(const void* next_obj,
+    //  MemcompareData get_memcompare_data(const void* next_obj,
     //                        next_function_t next_function,
     //                        detail::IteratorStack& stack)const
     // method.
@@ -213,6 +213,26 @@ namespace transparent_closure{
 
   namespace adapter{
     using next_function_t = MemcompareData(*)(const void*, IteratorStack&);
+
+    template<class T, class enable=void>
+    struct Adapter ;
+    
+    template<class T>
+    typename std::enable_if<
+      concepts::is_specialized<T>::value,
+      MemcompareData
+      >::type get_memcompare_data(
+	  const T* obj,
+	  IteratorStack& stack,
+	  const void* next_obj,
+	  next_function_t next_function){
+      return Adapter<T>::get_memcompare_data(
+	  obj,
+	  stack,
+	  next_obj,
+	  next_function);
+    };
+	  
     // is_protocol_compatible
     template <class T>
     typename std::enable_if<
@@ -344,4 +364,73 @@ namespace transparent_closure{
 
   } // adapter
 } // transparent_closure
+
+namespace transparent_closure{
+  namespace detail {
+    inline bool compare_memcompare_datas(
+	const MemcompareData& record1,
+	const MemcompareData& record2  ){
+      if(record1.obj_index != record2.obj_index ) return false;
+      if(static_cast<bool>(record1.obj)
+	 xor static_cast<bool>(record2.obj)) return false;
+      if((    not static_cast<bool>(record1.obj))
+	 and (not static_cast<bool>(record2.obj))) return true;
+      assert(static_cast<bool>(record1.obj) and static_cast<bool>(record2.obj));
+      
+      if(record1.size != record2.size ) return false;
+      return 0 == std::memcmp(record1.obj,record2.obj, record1.size );
+    };
+
+    inline bool is_final_record(const MemcompareData & record){
+      if(not static_cast<bool>(record.next_obj)){
+	assert(not static_cast<bool>(record.next_function ));
+	return true;
+      };
+      return false;
+    };
+
+  } // detail
+
+  template<class object_t>
+  inline bool compare_transparent_objects(
+      const object_t& obj1,
+      const object_t& obj2){
+    using detail::compare_memcompare_datas;
+    using detail::is_final_record; 
+    IteratorStack stack1{};
+    IteratorStack stack2{};
+    MemcompareData record1 =adapter::get_memcompare_data(
+	&obj1,
+	stack1,
+	nullptr,
+	nullptr
+    );
+    
+    MemcompareData record2 =adapter::get_memcompare_data(
+	&obj2,
+	stack2,
+	nullptr,
+	nullptr
+    );
+      
+    while(
+	not is_final_record(record1)
+	and not is_final_record(record2)
+    ){
+      if (not compare_memcompare_datas(record1, record2)){
+	return false;
+      };
+      record1 = record1.next_function(record1.next_obj,stack1 );
+      record2 = record2.next_function(record2.next_obj,stack2 );
+    };
+
+    if (is_final_record(record1) xor is_final_record(record2)) return false;
+
+    if (not compare_memcompare_datas(record1, record2)){
+      return false;
+    };
+    return true;
+  };
+      
+}// transparent_closure
 #endif // TRANSPARENT_CLOSURE_ALGORITHM_HPP 
