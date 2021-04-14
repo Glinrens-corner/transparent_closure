@@ -3,13 +3,15 @@
 
 #include <cassert>
 #include <memory>
-#include "meta_util.hpp"
 #include <iostream>
 #include <typeinfo>
 
+#include "meta_util.hpp"
+#include "algorithm.hpp"
+
 // ArgumentContainer
 namespace transparent_closure{
-
+  
   template<class arg_t, class enclosed_t>
   struct enclosed_argument {
     static_assert( std::is_convertible<const enclosed_t, arg_t>::value, "can't convert the enclosed_arg in a const context"); 
@@ -17,6 +19,13 @@ namespace transparent_closure{
     using argument_type = arg_t;
     using enclosed_type = enclosed_t;
   };
+
+  namespace detail {
+    struct  BasicStackSave {
+      const void *  next_obj;
+      adapter::next_function_t next_function;
+    };
+  } // detail
   
   namespace detail {
     template<class T>
@@ -196,7 +205,22 @@ namespace transparent_closure{
       template<class T>
       using apply_to = typename T::template apply<conversion_fn>;
     };
+
+    MemcompareData get_memcompare_data(
+	IteratorStack & stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const{
+      using detail::BasicStackSave;
+      new (stack.get_new<BasicStackSave>( )) BasicStackSave{
+	.next_obj = next_obj,
+	  .next_function = next_function
+      };
+      return this->get_memcompare_data_continuation(
+	  this,
+	  stack);
+    };
     
+
     template <std::size_t pos, class bind_t> 
     decltype(auto) bind_at(bind_t&& bind_arg ){
       static_assert( pos<sizeof...(argument_ts), "can't bind at non_existent position");
@@ -219,6 +243,24 @@ namespace transparent_closure{
       return std::apply(this->function_ptr_,std::move(apply_tuple) );
     };
 
+  protected:
+    static MemcompareData get_memcompare_data_continuation(
+	const void* self,
+	IteratorStack& stack
+    ){
+      using detail::BasicStackSave;
+      auto obj = reinterpret_cast<const ArgumentContainer<return_t, arguments_t>*>( self);
+      auto it = stack.pop_last<BasicStackSave>();
+      return MemcompareData{
+	.next_obj = it.next_obj,
+	  .next_function = it.next_function,
+	  .obj = &obj->function_ptr_,
+	  .size = sizeof(function_ptr_t),
+	  .obj_index = void_index
+	  };
+    };
+
+     
   private:
     function_ptr_t function_ptr_{};
   };
@@ -237,7 +279,7 @@ namespace transparent_closure{
       type_container<argument_ts...>
       ::template apply<detail::has_only_open_arguments>::value,
       void>::type>:
-  // TODO is it necessary that this inheritance is public?
+    // TODO is it necessary that this inheritance is public?
     public detail::derive_superclass<return_t,type_container<argument_ts...> >{
   private:
     using total_arguments_t = type_container<argument_ts...>;
@@ -255,11 +297,11 @@ namespace transparent_closure{
 
     using superclass_t = detail::derive_superclass<return_t,type_container<argument_ts...> >;
 
-       template <class ... arg_ts>
-       using index_of_first_enclosed_argument = index_of_first_matching<
-	 detail::is_enclosed_argument,
-	 arg_ts...
-	 >;
+    template <class ... arg_ts>
+    using index_of_first_enclosed_argument = index_of_first_matching<
+      detail::is_enclosed_argument,
+      arg_ts...
+      >;
     template<class ... arg_ts>
     using filter_open_arguments = filter<detail::is_open_argument, arg_ts... >;
     
@@ -272,7 +314,7 @@ namespace transparent_closure{
       ::template apply<index_of_first_enclosed_argument>
       :: value;
 
-        template<std::size_t pos, class enclosed_t>
+    template<std::size_t pos, class enclosed_t>
     struct enclose_argument_at_position{
       template<class arg_t>
       using transform_t = enclosed_argument<arg_t, enclosed_t>;
@@ -301,12 +343,40 @@ namespace transparent_closure{
       );
     };
     
+    MemcompareData get_memcompare_data(
+	IteratorStack & stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const{
+      using detail::BasicStackSave;
+      new (stack.get_new<BasicStackSave>( )) BasicStackSave{
+	.next_obj = next_obj,
+	  .next_function = next_function
+      };
+      return this->get_memcompare_data_continuation(
+	  this,
+	  stack);
+    };
+    
+    
     template <std::size_t pos, class bind_t> 
     decltype(auto) bind_at(bind_t&& bind_arg )&&{
       static_assert( pos<sizeof...(argument_ts), "can't bind at non_existent position");
       return std::move(*this).template bind_at_impl<pos>(std::forward<bind_t>(bind_arg));
       
     };
+  protected:
+    static MemcompareData get_memcompare_data_continuation(
+	const void* self,
+	IteratorStack& stack) {
+      auto obj = reinterpret_cast<const ArgumentContainer<return_t, total_arguments_t>*>( self);
+      return adapter::get_memcompare_data(
+	  &obj->enclosed_argument_,
+	  stack,
+	  self,
+	  &superclass_t::get_memcompare_data_continuation
+      );
+    };
+
   private:
     template<std::size_t pos, class bind_t,  typename enable_if< (pos<enclosed_position ) , bool>::type = true>
     decltype(auto) bind_at_impl( bind_t&& bind_arg)&&{
@@ -347,11 +417,23 @@ namespace transparent_closure{
   public:
     virtual return_t apply(apply_tuple_t )const=0;
     virtual ~ArgumentContainerHolderBase(){};
+    virtual MemcompareData get_memcompare_data(
+	IteratorStack& stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const=0;
   };
+
   
   template<class ... arg_ts>
   using filter_open_arguments = filter<detail::is_open_argument, arg_ts... >;
 
+  namespace detail {
+    // struct ContainerSaveRecord {
+    //   const void* next_obj,
+    //   adapter::next_function_t next_function
+    // };
+  } // detail
+  
   template<class return_t,class arguments_t>
   class ArgumentContainerHolder
     : public ArgumentContainerHolderBase<
@@ -363,7 +445,7 @@ namespace transparent_closure{
     using apply_tuple_t =
       typename arguments_t
       ::template apply<filter_open_arguments>
-  ::template apply<std::tuple>;
+      ::template apply<std::tuple>;
     
   public:
     ArgumentContainerHolder(
@@ -372,9 +454,46 @@ namespace transparent_closure{
     return_t apply(apply_tuple_t tuple)const{
       return this->container_.apply(std::move(tuple));
     };
+
+    MemcompareData get_memcompare_data(
+	IteratorStack& stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const{
+      using detail::BasicStackSave;
+      new (stack.get_new<BasicStackSave>()) BasicStackSave {
+	.next_obj = next_obj,
+	  .next_function = next_function
+	  };
+
+      return MemcompareData{
+	.next_obj = this,
+	  .next_function = ArgumentContainerHolder<return_t, arguments_t>::get_memcompare_data_continuation,
+	  .obj = nullptr,
+	  .size = 0,
+	  .obj_index = std::type_index(
+	      typeid(
+		  ArgumentContainerHolder<return_t, arguments_t>)
+	  )
+      };
+    };
   private:
+    static MemcompareData get_memcompare_data_continuation(
+	const void* self,
+	IteratorStack& stack){
+      using detail::BasicStackSave;
+      auto obj = reinterpret_cast<const ArgumentContainerHolder<return_t, arguments_t>*>( self);
+
+      auto  save = stack.pop_last<BasicStackSave>();
+      return obj->container_.get_memcompare_data(
+	  stack,
+	  save.next_obj,
+	  save.next_function);
+    };
+  private:
+    
     ArgumentContainer<return_t, arguments_t> container_;
   };
+
   template<class return_t, class arguments_t>
   class Function;
 
@@ -395,10 +514,23 @@ namespace transparent_closure{
 	  apply_tuple_t( std::forward<argument2_ts>(arguments)...)
       );
     };
+
+    MemcompareData get_memcompare_data(
+	IteratorStack& stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const{
+      return this->container_->get_memcompare_data(
+	  stack,
+	  next_obj,
+	  next_function);
+    };
+
   private:
     std::shared_ptr<ArgumentContainerHolderBase<return_t, type_container<argument_ts...> > > container_;
   };
   
+  template<class return_t, class arguments_t>
+  struct concepts::is_protocol_compatible<Function<return_t, arguments_t>>: std::true_type{};
 
 };
 
@@ -421,17 +553,26 @@ namespace transparent_closure{
     explicit Closure(container_t container):container_(std::move(container)){};
 
     Closure(Closure<return_t,arguments_t> && other)
-      :container_(std::move(other.container_)){
-      
-    };
-       
+      :container_(std::move(other.container_)){ };
+
     template<class ...argument_ts>
     return_t operator()(argument_ts...arguments)const{
       return this->container_(std::forward<argument_ts>(arguments)...);
     };
 
+    MemcompareData get_memcompare_data(
+	IteratorStack& stack,
+	const void* next_obj,
+	adapter::next_function_t next_function)const{
+      return this->container_.get_memcompare_data(
+	  stack,
+	  next_obj,
+	  next_function);
+    };
+    
     template<std::size_t pos, class bind_t>
     decltype(auto) bind_at(bind_t&& bind_arg)&&{
+      static_assert(concepts::is_transparent<typename std::remove_reference<bind_t>::type>::value, "your can only bind transparent_types");
       auto new_container = std::move(this->container_).template bind_at<pos>(std::forward<bind_t>(bind_arg));
       return Closure<return_t, typename decltype(new_container)::arguments_type>(std::move(new_container)
       );
@@ -452,8 +593,11 @@ namespace transparent_closure{
       return std::move(*this);
     };
   private:
-     container_t container_;
+    container_t container_;
   };
+
+  template<class return_t, class arguments_t>
+  struct concepts::is_protocol_compatible<Closure<return_t, arguments_t>>: std::true_type{};
   
   namespace detail {
     template <class function_t>
@@ -511,7 +655,7 @@ namespace transparent_closure{
 	return Closure<typename data::return_type, typename data::arguments_type>{
 	  ArgumentContainer<typename data::return_type, typename data::arguments_type >{
 	    static_cast<typename data::function_pointer_type>(arg )
-	    }
+	      }
 	};
       };
     };
@@ -537,7 +681,7 @@ namespace transparent_closure{
 	return Closure<typename data::return_type, typename data::arguments_type>{
 	  ArgumentContainer<typename data::return_type, typename data::arguments_type >{
 	    static_cast<typename data::function_pointer_type>(arg )
-	    }
+	      }
 	};
       };
     };
@@ -549,6 +693,7 @@ namespace transparent_closure{
       detail::to_function<function_t>
       >::make(function);
   };
+  
 }// transparent_closure
 
 #endif //TRANSPARENT_CLOSURE_CLOSURE_HPP

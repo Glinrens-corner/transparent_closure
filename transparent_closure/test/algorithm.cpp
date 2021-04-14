@@ -47,20 +47,81 @@ TEST_CASE("IteratorStack"){
   };
 };
 
+namespace {
+  transparent_closure::MemcompareData
+  test_fn1 (const void*, transparent_closure::IteratorStack &stack ){
+    return transparent_closure::MemcompareData{
+      .next_obj=nullptr,
+	.next_function = nullptr,
+	.obj = nullptr,
+	.size=0,
+	.obj_index = void_index
+	};
+  };
+
+  struct MemberAccessibleStruct {
+  public:
+    std::tuple<const int*, const float*>
+    get_member_access( )const{
+      return std::tuple<const int*, const float*>(&this->i,&this->j);
+    };
+    int i = 0;
+    float j = 1.0;
+  };
+} //
+
+template<>
+struct transparent_closure::concepts::is_member_accessible<MemberAccessibleStruct>: std::true_type{};
 
 TEST_CASE("get_memcompare_data"){
   using namespace transparent_closure;
-  int i=1;
-  IteratorStack stack{};
-  auto memcompare_data = adapter::get_memcompare_data<int>(
-      &i,
-      stack,
-      nullptr,
-      nullptr
-  );
-  //  CHECK_FALSE(memcompare_data.next_obj);
-  CHECK_FALSE(memcompare_data.next_function);
-  CHECK(memcompare_data.size == sizeof(int));
+  SUBCASE("trivial") {
+    // for a trivial type
+    // get_mem_compare_data fills the Memcompare data struct with
+    //   -- the passed next_function
+    //   -- the passed next_obj ptr
+    //   -- the size of the type
+    //   -- a pointer to the value
+    //   -- the void_index (for non polymorphic types type comparison is not needed.)
   
+    static_assert(concepts::is_trivial<int>::value, "int should be trivially transparent");
+    float next_obj =2.0;
+    void * next_obj_vptr = &next_obj;
+    adapter::next_function_t next_function = &test_fn1;
   
+    int i=1;
+    IteratorStack stack{};
+    auto memcompare_data = adapter::get_memcompare_data<int>(
+	&i,
+	stack,
+	next_obj_vptr,
+	next_function
+    );
+    CHECK(memcompare_data.next_function == next_function);
+    CHECK(memcompare_data.next_obj == next_obj_vptr);
+    CHECK(memcompare_data.size == sizeof(int));
+    CHECK(memcompare_data.obj == static_cast<const void*>(&i));
+    CHECK(memcompare_data.obj_index == void_index);
+  };
+
+  SUBCASE("member_accessible"){
+    float next_obj =2.0;
+    void * next_obj_vptr = &next_obj;
+    adapter::next_function_t next_function = &test_fn1;
+
+    MemberAccessibleStruct obj{};
+    IteratorStack stack{};
+    
+    auto memcompare_data = adapter::get_memcompare_data(
+	&obj,
+	stack,
+	next_obj_vptr,
+	next_function
+    );
+    REQUIRE( static_cast<bool>(memcompare_data.next_obj ));
+    REQUIRE( static_cast<bool>(memcompare_data.next_function ));
+    memcompare_data = std::move(memcompare_data.next_function(
+	memcompare_data.next_obj,
+	stack));
+  };  
 }

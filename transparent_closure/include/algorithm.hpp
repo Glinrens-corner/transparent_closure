@@ -6,6 +6,8 @@
 #include <cassert>
 #include <type_traits>
 #include <typeindex>
+#include <tuple>
+#include "meta_util.hpp"
 
 const auto void_index = std::type_index(typeid(void));
 
@@ -15,7 +17,7 @@ const auto void_index = std::type_index(typeid(void));
 
 #define TRANSPARENT_CLOSURE_MAX_SCALAR_ALIGNMENT 16
 
-//MemcompareInfo
+//MemcompareData
 namespace transparent_closure{
   class IteratorStack;
   
@@ -24,7 +26,7 @@ namespace transparent_closure{
     MemcompareData(*next_function)(const void*, IteratorStack&);
     const void * obj;
     std::size_t size;
-    const std::type_index obj_index;
+    std::type_index obj_index;
   };
 
 }// transparent_closure
@@ -134,8 +136,8 @@ namespace transparent_closure{
     struct is_specialized:std::false_type{};
     
     // a protocol_compatible type has a
-    //  MemcompareInfo get_memcompare_info(const void* next_obj,
-    //                        memcompare_continuation_fn_t continuation,
+    //  MemcompareInfo get_memcompare_data(const void* next_obj,
+    //                        next_function_t next_function,
     //                        detail::IteratorStack& stack)const
     // method.
     template<class T>
@@ -208,15 +210,26 @@ namespace transparent_closure{
     template<class enum_t>
     struct is_trivial<enum_t,typename std::enable_if<std::is_enum<enum_t>::value>::type> : std::true_type{};
   } // concepts
-  
-  namespace adapter_detail{
+
+  namespace adapter{
     using next_function_t = MemcompareData(*)(const void*, IteratorStack&);
-
-  } // adapter_detail
-  
-  // specializations of get_memcompare_data
-  namespace adapter {
-
+    // is_protocol_compatible
+    template <class T>
+    typename std::enable_if<
+      concepts::is_protocol_compatible<T>::value,
+      MemcompareData
+      >::type
+    get_memcompare_data(
+	const T* obj,
+	IteratorStack& stack,
+	const void* next_obj,
+	next_function_t next_function) {
+      return obj->get_memcompare_data(
+	  stack,
+	  next_obj,
+	  next_function);
+    };
+    
     //is_trivial
     template<class T>
     typename std::enable_if<
@@ -226,7 +239,7 @@ namespace transparent_closure{
     get_memcompare_data(const T* obj,
 			IteratorStack& stack,
 			const void* next_obj,
-			adapter_detail::next_function_t next_function){
+		        next_function_t next_function){
       return MemcompareData{
 	.next_obj=next_obj,
 	  .next_function = next_function,
@@ -234,7 +247,101 @@ namespace transparent_closure{
 	  .size=sizeof(T),
 	  .obj_index = void_index
 	  };
+    };    
+  }// adapter
+
+  // adapter is public with the intention that user may put their own template specializations into it. 
+  // I decided to not even put a sub namespace into it.  
+  namespace adapter_detail{
+    using adapter::next_function_t;
+    // a simple struct to push onto the iterator stack.
+    // for those cases when no iterator state is needed to be saved.
+    struct BasicIterationSave {
+      const void * next_obj;
+      next_function_t  next_function;
     };
+
+    template<class T>
+    constexpr std::size_t member_tuple_size(){
+      using tuple_t = decltype(static_cast<T*>(nullptr)->get_member_access());
+      return std::tuple_size<tuple_t>::value;
+    };
+
+    template<std::size_t position, class T>
+    typename std::enable_if<
+      (position >= member_tuple_size<T>()),
+	MemcompareData
+	>::type
+    get_memcompare_data_member_tuple(
+	const void*,
+	IteratorStack& stack
+    ){
+      auto it = stack.pop_last<BasicIterationSave>();
+      return MemcompareData {
+	.next_obj = it.next_obj,
+	  .next_function = it.next_function,
+	  .obj = nullptr,
+	  .size = 0,
+	  .obj_index = void_index
+	  };
+    };
+
+    template<std::size_t position, class T>
+    typename std::enable_if<
+      (position < member_tuple_size<T>()),
+	MemcompareData
+	>::type
+    get_memcompare_data_member_tuple(
+	const void* vobj,
+	IteratorStack& stack
+	){
+      const T* obj = static_cast<const T*>(vobj);
+      using member_pointer_t = typename std::tuple_element<position, decltype(obj->get_member_access())>::type;
+      // we want to assert that T is a pointer
+      // if T is not a pointer std::remove_pointer<member_ptr_t>::type is the same as T.
+      // so is_same is true if T is not a pointer.
+      static_assert(
+	  not
+	  std::is_same<
+	  member_pointer_t,
+	  typename std::remove_pointer<member_pointer_t>::type
+	  >::value, "this class returns a non-pointer in the tuple of get_member_access");
+      member_pointer_t member_pointer = std::get<position>(obj->get_member_access());
+   
+      next_function_t next_function = &get_memcompare_data_member_tuple<position+1, T>;
+      return adapter::get_memcompare_data(
+	  member_pointer,
+	  stack,
+	  obj,
+	  next_function);
+    };
+
+  } // adapter_detail
+  
+  // specializations of get_memcompare_data
+  namespace adapter {
+    
+    template<class T>
+    typename std::enable_if<
+      concepts::is_member_accessible<T>::value,
+      MemcompareData
+      >::type
+    get_memcompare_data(const T* obj,
+			IteratorStack& stack,
+			const void* next_obj,
+		        next_function_t next_function){
+      new ( stack.get_new<adapter_detail::BasicIterationSave>( ))
+	adapter_detail::BasicIterationSave{
+	.next_obj = next_obj,
+	  .next_function = next_function
+	  };
+      return adapter_detail::get_memcompare_data_member_tuple<0,T>(
+	  obj,
+	  stack);
+    };
+
+    
+
   } // adapter
 } // transparent_closure
 #endif // TRANSPARENT_CLOSURE_ALGORITHM_HPP 

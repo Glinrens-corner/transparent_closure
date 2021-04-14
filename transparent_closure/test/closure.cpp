@@ -223,3 +223,116 @@ TEST_CASE("ArgumentContainer"){
     };
   };
 };
+
+namespace {
+  transparent_closure::MemcompareData
+  next_function1(const void*, transparent_closure::IteratorStack &stack ){
+    return transparent_closure::MemcompareData{
+      .next_obj=nullptr,
+	.next_function = nullptr,
+	.obj = nullptr,
+	.size=0,
+	.obj_index = void_index
+	};
+  };
+}//
+
+TEST_CASE("comparisons"){
+  using namespace transparent_closure;
+  float next_obj = 2.0;
+  adapter::next_function_t next_function = &next_function1; 
+
+  SUBCASE("simple closure"){
+    // for a simple closure a record
+    //   for the enclosed function pointer is returned
+    Closure<long, type_container<int, int>> cl1 = make_closure(test_fn);
+    IteratorStack stack{};
+    REQUIRE(stack.get_size() == 0);
+    MemcompareData data =
+      adapter::get_memcompare_data(
+	  &cl1,
+	  stack,
+	  &next_obj,
+	  next_function);
+    CHECK(data.size == sizeof(adapter::next_function_t));
+    CHECK(static_cast<bool>(data.obj));
+    CHECK(data.obj_index == void_index);
+    CHECK(data.next_obj == &next_obj);
+    CHECK(data.next_function == next_function);
+    
+    CHECK(stack.get_size() == 0);
+  };
+  
+  SUBCASE("closure with_bound_arguments")  {
+    // for a closure with bound arguments records
+    //   for all bound arguments are returned
+    //   and for the enclosed function pointer
+    auto cl1 = make_closure(test_fn).bind_at<0,int>(22);
+    IteratorStack stack{};
+    REQUIRE(stack.get_size() == 0);
+    MemcompareData data =
+      adapter::get_memcompare_data(
+	  &cl1,
+	  stack,
+	  &next_obj,
+	  next_function);
+    CHECK(data.size == sizeof(int));
+    CHECK(static_cast<bool>(data.obj));
+    CHECK(data.obj_index == void_index);
+    CHECK(data.next_obj == &cl1);
+    CHECK(static_cast<bool>(data.next_function));
+    
+    CHECK(stack.get_size() != 0);
+    
+    data = data.next_function(data.next_obj, stack);
+    
+    CHECK(data.size == sizeof(adapter::next_function_t));
+    CHECK(static_cast<bool>(data.obj));
+    CHECK(data.obj_index == void_index);
+    CHECK(data.next_obj == &next_obj);
+    CHECK(data.next_function == next_function);
+    CHECK(stack.get_size() == 0);
+  };
+  SUBCASE("Function"){
+    // for a Function the algorithm at some time returns the
+    // type_index of the  ArgumentContainerHolder
+    //   then records for all bound arguments and the enclosed
+    //   functionpointer are returned
+    auto function1 = make_closure(test_fn).bind_at<0,int>(22).as_fun();
+    IteratorStack stack{};
+    REQUIRE(stack.get_size() == 0);
+    
+    MemcompareData data =
+      adapter::get_memcompare_data(
+	  &function1,
+	  stack,
+	  &next_obj,
+	  next_function);
+    CHECK( stack.get_size() != 0);
+    CHECK(static_cast<bool>(data.next_function) );
+    CHECK(static_cast<bool>(data.next_obj) );
+    CHECK_FALSE(static_cast<bool>(data.obj));
+    CHECK(data.obj_index == std::type_index(
+	      typeid(
+		  ArgumentContainerHolder<long,type_container<enclosed_argument<int,int>, int> >
+	      )
+	  ));
+
+    data = data.next_function(data.next_obj, stack);
+
+    CHECK( stack.get_size() != 0);
+    CHECK(static_cast<bool>(data.next_function) );
+    CHECK(static_cast<bool>(data.next_obj) );
+    CHECK(data.size == sizeof(int));
+    CHECK(static_cast<bool>(data.obj));
+    
+    data = data.next_function(data.next_obj, stack);
+    
+    CHECK( stack.get_size() == 0);
+
+    CHECK(data.next_function == next_function);
+    CHECK(data.next_obj == &next_obj);
+    CHECK(data.size == sizeof(decltype(&test_fn)));
+    CHECK(static_cast<bool>(data.obj));
+  };
+};
