@@ -1,6 +1,7 @@
 #ifndef TRANSPARENT_CLOSURE_TRANSPARENT_VECTOR_HPP
 #define TRANSPARENT_CLOSURE_TRANSPARENT_VECTOR_HPP
 #include "algorithm.hpp"
+#include <iostream>
 #include <vector>
 
 namespace vector_adapter {
@@ -21,7 +22,7 @@ namespace transparent_closure{
 
   namespace adapter {
     template<class value_t, class allocator_t>
-    struct Adapter<std::vector<value_t,allocator_t>, void>{
+    class Adapter<std::vector<value_t,allocator_t>, void>{
       static_assert(not std::is_same<value_t, bool>::value, "can't handle vectors of bool");
     private:
       using vector_t = std::vector<value_t,allocator_t>;
@@ -33,9 +34,9 @@ namespace transparent_closure{
 	  IteratorStack&stack) {
 	using vector_adapter::VectorIteratorStackRecord;
 	const vector_t& vec = *static_cast<const vector_t*>(vec_vptr);
-	auto it = stack.get_last<VectorIteratorStackRecord>();
-	
-	if (it.counter > vec.size()){
+	VectorIteratorStackRecord& it = stack.get_last<VectorIteratorStackRecord>();
+        
+	if (it.counter < vec.size()){
 	  auto ielement = it.counter;
 	  it.counter += 1;
 	  return adapter::get_memcompare_data(

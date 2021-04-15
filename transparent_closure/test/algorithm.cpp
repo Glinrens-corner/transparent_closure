@@ -3,7 +3,7 @@
 
 #include "doctest/doctest.h"
 #include "transparent_vector.hpp"
-
+#include "transparent_tuple.hpp"
 TEST_CASE("IteratorStack"){
   using transparent_closure::IteratorStack;
   SUBCASE("basic test"){
@@ -146,10 +146,33 @@ TEST_CASE("compare objects"){
     IteratorStack stack{};
     adapter::get_memcompare_data(&vec1, stack, nullptr, nullptr);
     CHECK(compare_transparent_objects(vec1,vec2));
-    // CHECK_FALSE(compare_transparent_objects(vec1,vec3));
-    // CHECK_FALSE(compare_transparent_objects(vec1,vec4));
-
-
+    CHECK_FALSE(compare_transparent_objects(vec1,vec3));
+    CHECK_FALSE(compare_transparent_objects(vec1,vec4));
   };
   
+  SUBCASE("tuple"){  
+    std::vector<int>vec1 {12,543,776 };
+    std::vector<int>vec2 {12,543,777 };
+    std::tuple< double,std::vector<int>, int> tuple1{
+      2.4,
+	vec1,
+	134
+    };
+
+    std::tuple< double,std::vector<int>, int> tuple2{
+      2.4,
+	vec1,
+	134
+    };
+
+    std::tuple< double,std::vector<int>, int> tuple3{
+      2.4,
+	vec2,
+	134
+    };
+    
+    CHECK(compare_transparent_objects(tuple1,tuple2));
+    CHECK_FALSE(compare_transparent_objects(tuple1,tuple3));
+    
+  };
 };
